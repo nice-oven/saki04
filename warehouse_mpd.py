@@ -217,10 +217,11 @@ def gen_transition_matrix_q(states, properties, a, q):
             # calculate their index
             indices = np.dot(s_new_full, index_counters)
             # set that index to 1/#states
-            trans[i, indices] = 1 / s_new.shape[0]
+            trans[i, indices] = 1 / indices.shape[0]
         else:
             trans[i, i] = 1
-
+            pass
+        # check
     q.put(trans)
 
 
@@ -383,6 +384,57 @@ def eval_mdp(mdp):
     - see if we get different distribution
     :return:
     """
+    pass
+
+
+def unpickle_mdp(properties, type_):
+    nr_fields = properties['nr_fields']
+    nr_fillings = properties['nr_fillings']
+    nr_actions = properties['nr_actions']
+    # type_ = str(type_)
+    # type_ = type_[type_.rfind(".")+1:type_.rfind("\\")-1]
+    filename = "./data/mdp/" + type_ + str(nr_fields) + "_" + str(nr_fillings) + "_" + str(nr_actions) + ".pickle"
+    with open(filename, "rb") as file:
+        mdp = pickle.load(file)
+    return mdp
+
+
+def pickle_mdp(properties, mdp):
+    nr_fields = properties['nr_fields']
+    nr_fillings = properties['nr_fillings']
+    nr_actions = properties['nr_actions']
+    type_ = str(type(mdp))
+    type_ = str(type_)
+    type_ = type_[type_.rfind(".")+1:type_.rfind("\\")-1]
+    filename = "./data/mdp/" + type_ + str(nr_fields) + "_" + str(nr_fillings) + "_" + str(nr_actions) + ".pickle"
+    with open(filename, "wb") as file:
+        pickle.dump(pi, file)
+
+
+def utility_one_item(properties, states, type_):
+    nr_fields = properties['nr_fields']
+    nr_fillings = properties['nr_fillings']
+    nr_actions = properties['nr_actions']
+    nr_next_col = properties['nr_next_col']
+    n_states = states.shape[0]
+    layout = properties['layout']
+
+    fields = np.zeros(layout)
+    field_count = np.zeros(layout)
+
+    mdp = unpickle_mdp(properties, type_)
+
+    v_arr = np.array(mdp.V)
+    unique_vals, f = np.unique(v_arr, return_counts=True)
+
+    idc = np.argsort(f)
+
+    unique_vals = unique_vals[idc]
+    f = f[idc]
+
+
+    print(":)")
+
 
 if __name__ == "__main__":
     print(ds_to_np(get_dataset("test_l")))
@@ -390,18 +442,16 @@ if __name__ == "__main__":
     get_dataset("train")
 
     properties = {
-        'nr_fields': 9,
+        'nr_fields': 6,
         'nr_fillings': 4,
         'nr_actions': 2,
         'nr_next_col': 3,
-        'layout': (3, 3)
+        'layout': (2, 3)
     }
 
     states = generate_states(properties)
-    #with open("./data/vali_L.pickle", "rb") as file:
-    #    pi = pickle.load(file)
 
-
+    utility_one_item(properties, states, "ValueIteration")
 
     print("generated", len(states), "states")
 
@@ -411,13 +461,6 @@ if __name__ == "__main__":
     data = unpickle_tran_mat(properties)
     rew = unpickle_rew_mat(properties)
 
-    print("nn", data[0].nnz)
-
-    s1 = sys.getsizeof(data)
-    s2 = sys.getsizeof(data[0])
-    s3 = sys.getsizeof(data[1])
-    s5 = sys.getsizeof(rew)
-    s6 = sys.getsizeof(rew[-1])
     print("loaded data")
 
     pi = mdptb.ValueIteration(transitions=data,
@@ -427,8 +470,8 @@ if __name__ == "__main__":
 
     print("running")
     results = pi.run()
-    print(pi.policy)
-    with open("./data/vali_L.pickle", "wb") as file:
-        pickle.dump(pi, file)
+
+    pickle_mdp(properties, pi)
+
     print("ok")
 
