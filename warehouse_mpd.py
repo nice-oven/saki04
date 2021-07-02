@@ -172,6 +172,9 @@ def gen_transition_matrix_q(states, properties, a, q):
     #           if empty
     #
     #   if take:
+    print("started", a)
+    last_percent = 0
+
     a = int(a)
 
 
@@ -181,54 +184,42 @@ def gen_transition_matrix_q(states, properties, a, q):
     nr_next_col = properties['nr_next_col']
     n_states = states.shape[0]
 
+    put_take = 2
+
     trans = lil_matrix((n_states, n_states))
-    curr_row = np.zeros((n_states, ))
-    print("started", a)
-    last_percent = 0
-    for s1 in range(n_states):
-        # print progess
-        curr_percent = int((s1 * 100) / n_states)
+
+    n_act_arr = np.array(list(product(range(put_take), range(nr_next_col))))
+    counters_fields = [nr_fillings] * nr_fields
+    counters_actions = [put_take, nr_next_col]
+    index_counters = np.array(counters_fields + counters_actions)
+    index_counters[:-1] = index_counters[1:]
+    index_counters[-1] = 1
+    index_counters = np.cumprod(index_counters[::-1])[::-1]
+    for i, s in enumerate(states):
+        # report progress
+        curr_percent = int((i * 100) / n_states)
         if curr_percent > last_percent + 4:
             print("a:", a, "at", curr_percent)
             last_percent = curr_percent
 
-        st1 = states[s1]
-
-        next_move = st1[-2]
-        next_color = st1[-1]
-
-        # check if
-        # putting: the spot in a is empty
-        if next_move == 0 and st1[a] != 3:
-            continue
-        # taking: the spot in st1 is the color
-        if next_move == 1 and st1[a] != next_color:
-            continue
-
-        for s2 in range(n_states):
-            st2 = states[s2]
-
-            # check if the fields of the states match
-            if np.any(st1[:a] != st2[:a]) or np.any(st1[a+1:nr_fields] != st2[a+1:nr_fields]):
-                continue
-
-            # make sure the successor field is correct in spot a
-            if next_move == 0 and st2[a] != next_color:
-                continue
-            if next_move == 1 and st2[a] != 3:
-                continue
-
-            curr_row[s2] = 1
-
-        curr_sum = np.sum(curr_row)
-
-        if curr_sum > 0:
-            curr_row /= curr_sum
+        # find adjacent sates
+        # on warehouse state level
+        n_col = s[-1]
+        n_move = s[-2]
+        s_new = None
+        if n_move == 0 and s[a] == 3:
+            s_new = np.concatenate((s[:a], [n_col], s[a + 1:nr_fields]))
+        if n_move == 1 and s[1] == n_col:
+            s_new = np.concatenate((s[:a], [3], s[a + 1: nr_fields]))
+        if s_new is not None:
+            s_new_r = np.tile(s_new, (n_act_arr.shape[0], 1))
+            s_new_full = np.concatenate((s_new_r, n_act_arr), axis=1)
+            # calculate their index
+            indices = np.dot(s_new_full, index_counters)
+            # set that index to 1/#states
+            trans[i, indices] = 1 / s_new.shape[0]
         else:
-            # curr_row[s1] = 1
-            pass
-        trans[s1] = curr_row
-        curr_row[:] = 0
+            trans[i, i] = 1
 
     q.put(trans)
 
@@ -255,7 +246,6 @@ def partitioned_gen_tran_ma(states, properties):
 
     for i, q in enumerate(queues):
         trans.append(q.get().tocsr())
-    t2 = trans[0].toarray()
     return trans
 
 
@@ -281,7 +271,6 @@ def partitioned_gen_rew_ma(states, properties):
 
     for i, q in enumerate(queues):
         trans.append(q.get().tocsr())
-    t2 = trans[0].toarray()
     return trans
 
 
@@ -335,6 +324,7 @@ def gen_reward_matrix_q(states, properties, a, q):
     n_states = states.shape[0]
 
     layout = properties['layout']
+    put_take = 2
 
     rows = np.arange(layout[0])
     columns = np.arange(layout[1])
@@ -346,35 +336,53 @@ def gen_reward_matrix_q(states, properties, a, q):
 
     distances = distances.flatten()
 
-    results = []
-
     trans = lil_matrix((n_states, n_states))
-    curr_row = np.zeros((n_states, ))
     print("started", a)
     last_percent = 0
-    for s1 in range(n_states):
-        # print("\ts1:", s1)
-        curr_percent = int((s1 * 100) / n_states)
+
+
+    n_act_arr = np.array(list(product(range(put_take), range(nr_next_col))))
+    counters_fields = [nr_fillings] * nr_fields
+    counters_actions = [put_take, nr_next_col]
+    index_counters = np.array(counters_fields + counters_actions)
+    index_counters[:-1] = index_counters[1:]
+    index_counters[-1] = 1
+    index_counters = np.cumprod(index_counters[::-1])[::-1]
+    for i, s in enumerate(states):
+        # report progress
+        curr_percent = int((i * 100) / n_states)
         if curr_percent > last_percent + 4:
             print("a:", a, "at", curr_percent)
             last_percent = curr_percent
-        for s2 in range(n_states):
-            st1 = states[s1]
-            st2 = states[s2]
 
-            n_act = st1[-2]
-            n_col = st1[-1]
+        # find adjacent sates
+        # on warehouse state level
+        n_col = s[-1]
+        n_move = s[-2]
+        s_new = None
+        if n_move == 0 and s[a] == 3:
+            s_new = np.concatenate((s[:a], [n_col], s[a + 1:nr_fields]))
+        if n_move == 1 and s[1] == n_col:
+            s_new = np.concatenate((s[:a], [3], s[a + 1: nr_fields]))
+        if s_new is not None:
+            s_new_r = np.tile(s_new, (n_act_arr.shape[0], 1))
+            s_new_full = np.concatenate((s_new_r, n_act_arr), axis=1)
+            # calculate their index
+            indices = np.dot(s_new_full, index_counters)
+            # set that index to 1/#states
+            trans[i, indices] = 10 - (.5 * distances[a])
 
-            if n_act == 0:  # put
-                if st1[a] == 3 and st2[a] == n_col:  # todo constant for empty field
-                    curr_row[s2] = 10 - distances[a]
-            else:  # take
-                if st1[a] == n_col and st2[a] == 3:
-                    curr_row[s2] = 10 - distances[a]
-        # normalize row
-        trans[s1] = curr_row
-        curr_row[:] = 0
     q.put(trans)
+
+
+def eval_mdp(mdp):
+    """
+    - get the utility per action / field
+    - visualize
+    - have an experiment, where one item is very unlikely to appear say less than 5%
+    - see if we get different distribution
+    :return:
+    """
 
 if __name__ == "__main__":
     print(ds_to_np(get_dataset("test_l")))
@@ -382,11 +390,11 @@ if __name__ == "__main__":
     get_dataset("train")
 
     properties = {
-        'nr_fields': 6,
+        'nr_fields': 9,
         'nr_fillings': 4,
         'nr_actions': 2,
         'nr_next_col': 3,
-        'layout': (2, 3)
+        'layout': (3, 3)
     }
 
     states = generate_states(properties)
@@ -397,8 +405,8 @@ if __name__ == "__main__":
 
     print("generated", len(states), "states")
 
-    pickle_tran_mat(partitioned_gen_tran_ma(states, properties), properties)
-    #pickle_rew_mat(partitioned_gen_rew_ma(states, properties), properties)
+    # pickle_tran_mat(partitioned_gen_tran_ma(states, properties), properties)
+    # pickle_rew_mat(partitioned_gen_rew_ma(states, properties), properties)
 
     data = unpickle_tran_mat(properties)
     rew = unpickle_rew_mat(properties)
@@ -413,15 +421,14 @@ if __name__ == "__main__":
     print("loaded data")
 
     pi = mdptb.ValueIteration(transitions=data,
-                               reward=rew,
-                               discount=.95,
-                              skip_check=True)
+                              reward=rew,
+                              discount=.95)
     pi.setVerbose()
 
     print("running")
     results = pi.run()
     print(pi.policy)
-    #with open("./data/vali_L.pickle", "wb") as file:
-    #    pickle.dump(pi, file)
+    with open("./data/vali_L.pickle", "wb") as file:
+        pickle.dump(pi, file)
     print("ok")
 
