@@ -23,6 +23,11 @@ What we are going to do:
 
 """
 
+"""
+# IO
+"""
+
+
 def get_dataset(name):
     datasets = {
         "test_l": './data/warehouseorder2x2.txt',
@@ -48,6 +53,74 @@ def ds_to_np(ds):
     encoded = [[actions.index(el[0]), colors.index(el[1])] for el in ds]
 
     return np.array(encoded, dtype=int)
+
+
+def filename_from_properties(properties):
+    nr_fields = properties['nr_fields']
+    nr_fillings = properties['nr_fillings']
+    nr_actions = properties['nr_actions']
+    nr_next_col = properties['nr_next_col']
+    layout = properties['layout']
+    color_frequencies_str = "_".join( "{:5f}".format(cf) for cf in properties['color_frequencies'])
+    return "_".join((str(nr_fields),
+                     str(nr_fillings),
+                     str(nr_actions),
+                     str(layout[0]),
+                     str(layout[1]),
+                     color_frequencies_str))
+
+
+def pickle_tran_mat(transition_matrix, properties):
+    filename = filename_from_properties(properties)
+    filename = './data/tran_ma/' + filename + ".pickle"
+    with open(filename, 'wb') as file:
+        pickle.dump(transition_matrix, file)
+
+
+def unpickle_tran_mat(properties):
+    filename = filename_from_properties(properties)
+    filename = './data/tran_ma/' + filename + ".pickle"
+    with open(filename, 'rb') as file:
+        data = pickle.load(file)
+    return data
+
+
+def pickle_rew_mat(transition_matrix, properties):
+    filename = filename_from_properties(properties)
+    filename = './data/rew_ma/' + filename + ".pickle"
+    with open(filename, 'wb') as file:
+        pickle.dump(transition_matrix, file)
+
+
+def unpickle_rew_mat(properties):
+    filename = filename_from_properties(properties)
+    filename = './data/rew_ma/' + filename + ".pickle"
+    with open(filename, 'rb') as file:
+        data = pickle.load(file)
+    return data
+
+
+def unpickle_mdp(properties, type_):
+    filename = filename_from_properties(properties)
+    filename = "./data/mdp/" + type_ + filename + ".pickle"
+    with open(filename, "rb") as file:
+        mdp = pickle.load(file)
+    return mdp
+
+
+def pickle_mdp(properties, mdp):
+    type_ = str(type(mdp))
+    type_ = str(type_)
+    type_ = type_[type_.rfind(".")+1:type_.rfind("\\")-1]
+    filename = filename_from_properties(properties)
+    filename = "./data/mdp/" + type_ + filename + ".pickle"
+    with open(filename, "wb") as file:
+        pickle.dump(mdp, file)
+
+
+"""
+# Prepare Inputs of MDPs
+"""
 
 
 def generate_states(properties):
@@ -79,15 +152,12 @@ def generate_states(properties):
 
 
 def gen_transition_matrix(states, properties):
-    # for each action -> put in field x, y
-    # for each state
-    # for each state
-    #   if put:
-    #       if all same but one
-    #       for each loc:
-    #           if empty
-    #
-    #   if take:
+    """
+    for each action for each state for each state check if a transition can be made
+    :param states: possible states, flat
+    :param properties: properties of the world
+    :return: transition matrix of shape (actions, states, states)
+    """
 
     nr_fields = properties['nr_fields']
     nr_fillings = properties['nr_fillings']
@@ -120,69 +190,95 @@ def gen_transition_matrix(states, properties):
                 trans[s1] /= row_sum
     return trans
 
-
-def filename_from_properties(properties):
-    nr_fields = properties['nr_fields']
-    nr_fillings = properties['nr_fillings']
-    nr_actions = properties['nr_actions']
-    nr_next_col = properties['nr_next_col']
+def gen_reward_matrix(states, trans, properties):
+    """
+    takes the transition matrix and writes rewards where there are transitions indicated
+    :param states:
+    :param trans:
+    :param properties:
+    :return: rewards of shape (actions, states, states) - unnecessaryily complex as reward is determined by action
+    """
     layout = properties['layout']
-    color_frequencies_str = "_".join( "{:5f}".format(cf) for cf in properties['color_frequencies'])
-    return "_".join((str(nr_fields),
-                     str(nr_fillings),
-                     str(nr_actions),
-                     str(layout[0]),
-                     str(layout[1]),
-                     color_frequencies_str))
 
-def pickle_tran_mat(transition_matrix, properties):
-    filename = filename_from_properties(properties)
-    filename = './data/tran_ma/' + filename + ".pickle"
-    with open(filename, 'wb') as file:
-        pickle.dump(transition_matrix, file)
+    rows = np.arange(layout[0])
+    columns = np.arange(layout[1])
 
-def unpickle_tran_mat(properties):
-    filename = filename_from_properties(properties)
-    filename = './data/tran_ma/' + filename + ".pickle"
-    with open(filename, 'rb') as file:
-        data = pickle.load(file)
-    return data
+    distances = np.ones(layout)
+
+    distances += columns
+    distances = (distances.T + rows).T
+
+    distances = distances.flatten()
+
+    results = []
+
+    # reward characteristics
+    # put_bonus
+    # move_malus * nr_of_moves
+    for a_nr, sxs in enumerate(trans):
+        states_sq = sxs.toarray()
+        indices = np.where(np.all(1 > states_sq > 0))
+        out = np.zeros(states_sq.shape)
+        out[indices] = 10 - distances[a_nr]
+
+        results.append(csr_matrix(out))
+
+    return results
 
 
-def pickle_rew_mat(transition_matrix, properties):
-    filename = filename_from_properties(properties)
-    filename = './data/rew_ma/' + filename + ".pickle"
-    with open(filename, 'wb') as file:
-        pickle.dump(transition_matrix, file)
+"""
+# Partitioned Generation
+"""
 
-def unpickle_rew_mat(properties):
-    filename = filename_from_properties(properties)
-    filename = './data/rew_ma/' + filename + ".pickle"
-    with open(filename, 'rb') as file:
-        data = pickle.load(file)
-    return data
 
+def partitioned_gen_tran_ma(states, properties):
+    return start_partitioned_job(states, properties, gen_transition_matrix_q)
+
+
+def start_partitioned_job(states, properties, target):
+    """
+    just start one process per action - doesnt make sense for small problems...
+    :param states:
+    :param properties:
+    :param target:
+    :return:
+    """
+    nr_fields = properties['nr_fields']
+
+    # trans = np.zeros((nr_fields, n_states, n_states))  # using list of lil_matrix matrices
+    results = []
+
+    processes = []
+    queues = []
+    for a in range(nr_fields):
+        queues.append(mp.Queue())
+        p = mp.Process(target=target, args=(states, properties, a, queues[-1]))
+        p.start()
+
+    for proc in processes:
+        proc.join()
+
+    for i, q in enumerate(queues):
+        results.append(q.get().tocsr())
+    return results
 
 
 def gen_transition_matrix_q(states, properties, a, q):
-    # for each action -> put in field x, y
-    # for each state
-    # for each state
-    #   if put:
-    #       if all same but one
-    #       for each loc:
-    #           if empty
-    #
-    #   if take:
+    """
+    basic idea is to calculate the indices of the possible next states from the current state, then set the trans proba
+    :param states:
+    :param properties:
+    :param a:
+    :param q:
+    :return: transition matrix of shape (actions, states, states)
+    """
     print("started", a)
     last_percent = 0
 
     a = int(a)
 
-
     nr_fields = properties['nr_fields']
     nr_fillings = properties['nr_fillings']
-    nr_actions = properties['nr_actions']
     nr_next_col = properties['nr_next_col']
     n_states = states.shape[0]
     color_frequencies = properties['color_frequencies']
@@ -229,102 +325,22 @@ def gen_transition_matrix_q(states, properties, a, q):
     q.put(trans)
 
 
-def partitioned_gen_tran_ma(states, properties):
-    nr_fields = properties['nr_fields']
-    nr_fillings = properties['nr_fillings']
-    nr_actions = properties['nr_actions']
-    nr_next_col = properties['nr_next_col']
-    n_states = states.shape[0]
-
-    # trans = np.zeros((nr_fields, n_states, n_states))  # using list of lil_matrix matrices
-    trans = []
-
-    processes = []
-    queues = []
-    for a in range(nr_fields):
-        queues.append(mp.Queue())
-        p = mp.Process(target=gen_transition_matrix_q, args=(states, properties, a, queues[-1]))
-        p.start()
-
-    for proc in processes:
-        proc.join()
-
-    for i, q in enumerate(queues):
-        trans.append(q.get().tocsr())
-    return trans
-
-
 def partitioned_gen_rew_ma(states, properties):
-    nr_fields = properties['nr_fields']
-    nr_fillings = properties['nr_fillings']
-    nr_actions = properties['nr_actions']
-    nr_next_col = properties['nr_next_col']
-    n_states = states.shape[0]
+    return start_partitioned_job(states, properties, gen_reward_matrix_q)
 
-    # trans = np.zeros((nr_fields, n_states, n_states))  # using list of lil_matrix matrices
-    trans = []
-
-    processes = []
-    queues = []
-    for a in range(nr_fields):
-        queues.append(mp.Queue())
-        p = mp.Process(target=gen_reward_matrix_q, args=(states, properties, a, queues[-1]))
-        p.start()
-
-    for proc in processes:
-        proc.join()
-
-    for i, q in enumerate(queues):
-        trans.append(q.get().tocsr())
-    return trans
-
-
-def gen_reward_matrix(states, trans, properties):
-    nr_fields = properties['nr_fields']
-    nr_fillings = properties['nr_fillings']
-    nr_actions = properties['nr_actions']
-    nr_next_col = properties['nr_next_col']
-    layout = properties['layout']
-
-    rows = np.arange(layout[0])
-    columns = np.arange(layout[1])
-
-    distances = np.ones(layout)
-
-    distances += columns
-    distances = (distances.T + rows).T
-
-    distances = distances.flatten()
-
-    results = []
-
-    # reward characteristics
-    # put_bonus
-    # move_malus * nr_of_moves
-    for a_nr, sxs in enumerate(trans):
-        states_sq = sxs.toarray()
-        indices = np.where(np.all(1 > states_sq > 0))
-        out = np.zeros(states_sq.shape)
-        out[indices] = 10 - distances[a_nr]
-
-        results.append(csr_matrix(out))
-
-    return results
 
 def gen_reward_matrix_q(states, properties, a, q):
-    # for each action -> put in field x, y
-    # for each state
-    # for each state
-    #   if put:
-    #       if all same but one
-    #       for each loc:
-    #           if empty
-    #
-    #   if take:
+    """
+    same idea as in gen_transition_matrix_q but with rewards
+    :param states:
+    :param properties:
+    :param a:
+    :param q:
+    :return:
+    """
 
     nr_fields = properties['nr_fields']
     nr_fillings = properties['nr_fillings']
-    nr_actions = properties['nr_actions']
     nr_next_col = properties['nr_next_col']
     n_states = states.shape[0]
 
@@ -344,7 +360,6 @@ def gen_reward_matrix_q(states, properties, a, q):
     trans = lil_matrix((n_states, n_states))
     print("started", a)
     last_percent = 0
-
 
     n_act_arr = np.array(list(product(range(put_take), range(nr_next_col))))
     counters_fields = [nr_fillings] * nr_fields
@@ -380,6 +395,11 @@ def gen_reward_matrix_q(states, properties, a, q):
     q.put(trans)
 
 
+"""
+# evaluations
+"""
+
+
 def eval_mdp(mdp):
     """
     - get the utility per action / field
@@ -389,24 +409,6 @@ def eval_mdp(mdp):
     :return:
     """
     pass
-
-
-def unpickle_mdp(properties, type_):
-    filename = filename_from_properties(properties)
-    filename = "./data/mdp/" + type_ + filename + ".pickle"
-    with open(filename, "rb") as file:
-        mdp = pickle.load(file)
-    return mdp
-
-
-def pickle_mdp(properties, mdp):
-    type_ = str(type(mdp))
-    type_ = str(type_)
-    type_ = type_[type_.rfind(".")+1:type_.rfind("\\")-1]
-    filename = filename_from_properties(properties)
-    filename = "./data/mdp/" + type_ + filename + ".pickle"
-    with open(filename, "wb") as file:
-        pickle.dump(mdp, file)
 
 
 def count_expected_reward(rewards):
@@ -448,7 +450,7 @@ def value_per_color(properties, states, type_):
         field_count[(action, color, *field_index)] += 1
     # normalize
     fields[:, :3] /= field_count[:, :3]
-    #field_count /= np.sum(field_count)
+    # field_count /= np.sum(field_count)
     print(":)")
 
     visualize_value_per_color(fields, "avg. expected utility of action")
@@ -577,6 +579,12 @@ def run_experiment(properties, new_tran=False, new_rew=False):
 
 
 def real_greedy(properties, ds_name):
+    """
+    greedily fill the warehouse following reward based on Manhattan distance
+    :param properties:
+    :param ds_name:
+    :return: sum of rewards
+    """
     states = generate_states(properties)
 
     nr_fields = properties['nr_fields']
@@ -600,7 +608,6 @@ def real_greedy(properties, ds_name):
     index_counters[:-1] = index_counters[1:]
     index_counters[-1] = 1
     index_counters = np.cumprod(index_counters[::-1])[::-1]
-
 
     rows = np.arange(layout[0])
     columns = np.arange(layout[1])
@@ -643,6 +650,7 @@ def real_greedy(properties, ds_name):
 
     return total_reward
 
+
 if __name__ == "__main__":
     properties = {
         'nr_fields': 4,
@@ -653,10 +661,10 @@ if __name__ == "__main__":
         'color_frequencies': np.array([0.33333, 0.33333, 0.33334])  # [0.33333, 0.6, 0.06667]
     }
 
-    real_greedy(properties, "test_l")
+    # real_greedy(properties, "test_l")
 
-    reward_from_following_policy(properties, "test_l")
+    # reward_from_following_policy(properties, "test_l")
 
-    states = run_experiment(properties, False, False)
+    states = run_experiment(properties, True, True)
 
     value_per_color(properties, states, "ValueIteration")
